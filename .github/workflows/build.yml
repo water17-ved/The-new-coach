@@ -13,32 +13,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Extract latest JEE Coach ZIP
         run: |
-          unzip -q JEE-Coach-Native-Android-v3-Persistent-Memory-Chat.zip -d extracted
+          rm -rf extracted
+          ZIP="$(find . -maxdepth 1 -type f -name 'JEE-Coach-Native-Android-v3-Repaired.zip' -print -quit)"
+          test -n "$ZIP"
+          unzip -q "$ZIP" -d extracted
+          test -f extracted/settings.gradle.kts
+          test -f extracted/app/build.gradle.kts
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Gradle 8.9
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
-          unzip -q gradle-8.9-bin.zip -d "$HOME"
-          echo "$HOME/gradle-8.9/bin" >> "$GITHUB_PATH"
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Generate wrapper
+      - name: Build debug APK
         working-directory: extracted
-        run: gradle wrapper --gradle-version 8.9
-
-      - name: Build APK
-        working-directory: extracted
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: JEE-Coach-debug
           path: extracted/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
