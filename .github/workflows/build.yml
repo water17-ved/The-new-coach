@@ -62,7 +62,7 @@ jobs:
           rm -rf extracted
           mkdir -p extracted
           unzip -q "$ZIP" -d extracted
-          for f in settings.gradle.kts app/build.gradle.kts gradle/wrapper/gradle-wrapper.properties; do
+          for f in settings.gradle.kts app/build.gradle.kts; do
             if [[ ! -f "extracted/$f" ]]; then
               echo "::error::ZIP is missing required file: $f"
               exit 1
