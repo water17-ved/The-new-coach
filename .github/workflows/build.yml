@@ -36,7 +36,6 @@ jobs:
             exit 1
           fi
           echo "Using: $ZIP"
-          echo "zip_name=${ZIP%.zip}" >> "$GITHUB_OUTPUT"
           rm -rf extracted
           mkdir -p extracted
           unzip -q "$ZIP" -d extracted
@@ -48,18 +47,6 @@ jobs:
           done
           echo "✅ Extraction complete."
 
-      - name: Fix JVM target mismatch via Gradle init script
-        run: |
-          mkdir -p ~/.gradle/init.d
-          cat > ~/.gradle/init.d/jvm-target-fix.gradle << 'EOF'
-          allprojects {
-              tasks.withType(JavaCompile).configureEach {
-                  sourceCompatibility = "17"
-                  targetCompatibility = "17"
-              }
-          }
-          EOF
-
       - name: Build debug APK
         working-directory: extracted
         env:
@@ -69,8 +56,7 @@ jobs:
             --stacktrace \
             --no-daemon \
             --warning-mode all \
-            --build-cache \
-            -Pkotlin.jvm.target.validation.mode=IGNORE
+            --build-cache
 
       - name: Verify APK exists and print size
         shell: bash
