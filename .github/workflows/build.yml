@@ -11,96 +11,195 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+
+      # 1. Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
+
+      # 2. Find the uploaded ZIP
       - name: Find project ZIP
         id: find_zip
+        shell: bash
         run: |
           ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: No ZIP file found."
+            echo "ERROR: No ZIP file found in repository."
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP"
+          echo "Found project ZIP:"
+          echo "$ZIP"
+
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
+
+      # 3. Check ZIP is not corrupted
       - name: Verify ZIP
         run: |
-          ZIP="${{ steps.find_zip.outputs.zip }}"
+          echo "Checking ZIP integrity..."
+          unzip -t "${{ steps.find_zip.outputs.zip }}"
 
-          echo "Testing ZIP integrity..."
-          unzip -t "$ZIP"
 
+      # 4. Extract ZIP
       - name: Extract project
         run: |
           rm -rf extracted
-          mkdir extracted
+          mkdir -p extracted
 
+          echo "Extracting project..."
           unzip -q "${{ steps.find_zip.outputs.zip }}" -d extracted
 
-          echo "Extracted files:"
-          find extracted -maxdepth 3 -type f | head -100
+          echo ""
+          echo "Extraction complete."
+          echo "Project files:"
+          find extracted -maxdepth 4 -type f | head -150
 
+
+      # 5. Find the Android project automatically
       - name: Locate Android project
         id: locate
+        shell: bash
         run: |
-          PROJECT=$(find extracted -type f -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
+          SETTINGS=$(find extracted -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            | head -n 1)
 
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: No Gradle Android project found."
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: settings.gradle.kts or settings.gradle not found."
+            echo "The ZIP does not appear to contain a valid Android project."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$PROJECT")
+          PROJECT_DIR=$(dirname "$SETTINGS")
 
-          echo "Android project found at: $PROJECT_DIR"
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
+
+      # 6. Validate project
       - name: Validate Android project
         working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
         run: |
-          test -f app/build.gradle.kts -o -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
+          if [ ! -f "app/build.gradle.kts" ] && [ ! -f "app/build.gradle" ]; then
+            echo "ERROR: app/build.gradle.kts or app/build.gradle not found."
+            exit 1
+          fi
 
-          echo "Android project validation passed."
+          if [ ! -f "app/src/main/AndroidManifest.xml" ]; then
+            echo "ERROR: AndroidManifest.xml not found."
+            exit 1
+          fi
 
-      - name: Set up Java
+          echo "Android project validation PASSED."
+
+
+      # 7. Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+
+      # 8. Gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+
+      # 9. Generate Gradle wrapper
       - name: Generate Gradle wrapper
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
           gradle wrapper --gradle-version 8.9
 
+
+      # 10. Force Java/Kotlin 17 in Android module
+      - name: Fix Java and Kotlin JVM targets
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          files = [
+              Path("app/build.gradle.kts"),
+              Path("app/build.gradle")
+          ]
+
+          target = next((p for p in files if p.exists()), None)
+
+          if target is None:
+              raise SystemExit("Gradle app file not found.")
+
+          text = target.read_text()
+
+          # Add compileOptions if missing
+          if "sourceCompatibility = JavaVersion.VERSION_17" not in text:
+              block = """
+              
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+          """
+              text += block
+
+          # Add Kotlin JVM toolchain if missing
+          if "jvmToolchain(17)" not in text:
+              text += """
+              
+          kotlin {
+              jvmToolchain(17)
+          }
+          """
+
+          target.write_text(text)
+
+          print("Updated:", target)
+          PY
+
+
+      # 11. Build Debug APK
       - name: Build Debug APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
           chmod +x gradlew
+
+          echo "Starting Android build..."
+
           ./gradlew clean assembleDebug --stacktrace
 
+
+      # 12. Check APK exists
       - name: Verify APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: Debug APK was not generated."
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
-          echo "APK successfully generated:"
+          echo ""
+          echo "======================================"
+          echo "       APK BUILD SUCCESSFUL"
+          echo "======================================"
+          echo ""
+
           ls -lh "$APK"
 
-      - name: Upload APK
+
+      # 13. Upload APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: JEE-Coach-debug
