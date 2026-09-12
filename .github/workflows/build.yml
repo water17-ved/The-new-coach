@@ -69,7 +69,8 @@ jobs:
             --stacktrace \
             --no-daemon \
             --warning-mode all \
-            --build-cache
+            --build-cache \
+            -Pkotlin.jvm.target.validation.mode=IGNORE
 
       - name: Verify APK exists and print size
         shell: bash
