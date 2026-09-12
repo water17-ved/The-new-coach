@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@v4
@@ -30,9 +32,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP=$(ls -t JEE-Coach-Native-Android-*.zip 2>/dev/null | head -n1 || true)
+          ZIP=$(git log --diff-filter=A --name-only --format="" -- "JEE-Coach-Native-Android-*.zip" | head -n1 || true)
           if [[ -z "$ZIP" ]]; then
-            echo "::error file=build.yml::No JEE-Coach-Native-Android-*.zip found in repo root."
+            echo "::error file=build.yml::No JEE-Coach-Native-Android-*.zip found in git history."
             exit 1
           fi
           echo "Using: $ZIP"
