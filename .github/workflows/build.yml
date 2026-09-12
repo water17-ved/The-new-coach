@@ -1,4 +1,4 @@
-lname: Build JEE Coach APK
+name: Build JEE Coach APK
 
 on:
   workflow_dispatch:
@@ -292,4 +292,4 @@ jobs:
         with:
           name: JEE-Coach-debug
           path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error 
+          if-no-files-found: error
