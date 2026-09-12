@@ -70,6 +70,21 @@ jobs:
           done
           echo "✅ Extraction complete."
 
+      - name: Fix JVM target mismatch via Gradle init script
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/jvm-target-fix.gradle << 'EOF'
+          allprojects {
+              tasks.withType(JavaCompile).configureEach {
+                  sourceCompatibility = "17"
+                  targetCompatibility = "17"
+              }
+              tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                  kotlinOptions.jvmTarget = "17"
+              }
+          }
+          EOF
+
       - name: Build debug APK
         working-directory: extracted
         env:
