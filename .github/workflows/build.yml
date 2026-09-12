@@ -11,285 +11,214 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ---------------------------------------------------------
-      # 1. CHECKOUT
-      # ---------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       # ---------------------------------------------------------
-      # 2. FIND THE EXACT JEE COACH ZIP
-      # ---------------------------------------------------------
-      - name: Find JEE Coach ZIP
-        id: zip
-        shell: bash
-        run: |
-          ZIP="./JEE-Coach-Native-Android-v3-Persistent-Memory-Chat.zip"
-
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: JEE Coach ZIP not found:"
-            echo "$ZIP"
-            echo ""
-            echo "Files in repository:"
-            find . -maxdepth 2 -type f | sort
-            exit 1
-          fi
-
-          echo "Found:"
-          echo "$ZIP"
-
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
-
-
-      # ---------------------------------------------------------
-      # 3. VERIFY ZIP
-      # ---------------------------------------------------------
-      - name: Verify ZIP integrity
-        run: |
-          echo "Testing ZIP..."
-          unzip -t "${{ steps.zip.outputs.zip }}"
-
-          echo "ZIP integrity check passed."
-
-
-      # ---------------------------------------------------------
-      # 4. EXTRACT
+      # 1. Find and extract the JEE Coach ZIP
       # ---------------------------------------------------------
       - name: Extract JEE Coach project
         shell: bash
         run: |
-          rm -rf extracted
-          mkdir -p extracted
+          set -e
 
-          unzip -q "${{ steps.zip.outputs.zip }}" -d extracted
+          ZIP="JEE-Coach-Native-Android-v3-Persistent-Memory-Chat.zip"
 
-          echo "Extraction completed."
-
-          echo ""
-          echo "Extracted project:"
-          find extracted -maxdepth 3 -type f | sort
-
-
-      # ---------------------------------------------------------
-      # 5. LOCATE PROJECT
-      # ---------------------------------------------------------
-      - name: Locate Android project
-        id: project
-        shell: bash
-        run: |
-          SETTINGS=$(find extracted -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            | head -n 1)
-
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle(.kts) not found."
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP was not found."
+            echo "ZIP files present in repository:"
+            find . -maxdepth 2 -type f -name "*.zip" -print
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
+          rm -rf extracted
+          mkdir -p extracted
 
-          echo "Android project:"
-          echo "$PROJECT_DIR"
+          unzip -q "$ZIP" -d extracted
 
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | sort
 
+          if [ ! -f "extracted/settings.gradle.kts" ]; then
+            echo "ERROR: Android project was not extracted at expected root."
+            exit 1
+          fi
 
-      # ---------------------------------------------------------
-      # 6. VERIFY EXPECTED JEE COACH STRUCTURE
-      # ---------------------------------------------------------
-      - name: Validate JEE Coach project
-        working-directory: ${{ steps.project.outputs.project_dir }}
-        shell: bash
-        run: |
-          echo "Checking project structure..."
-
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/java/com/jeecoach/app/MainActivity.kt
-
-          echo "Project structure OK."
-
+          if [ ! -f "extracted/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found."
+            exit 1
+          fi
 
       # ---------------------------------------------------------
-      # 7. JAVA 17
+      # 2. Java 17
       # ---------------------------------------------------------
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-
       # ---------------------------------------------------------
-      # 8. GRADLE
+      # 3. Fix Android/Kotlin build configuration
       # ---------------------------------------------------------
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-
-      # ---------------------------------------------------------
-      # 9. UPDATE PROJECT TO COMPATIBLE STABLE TOOLCHAIN
-      #
-      # AGP     8.13.2
-      # Kotlin  2.3.20
-      # Gradle  8.13
-      # Java    17
-      # ---------------------------------------------------------
-      - name: Update Android build tool versions
-        working-directory: ${{ steps.project.outputs.project_dir }}
+      - name: Configure Android build
         shell: bash
         run: |
+          set -e
+
+          cd extracted
+
           python3 <<'PY'
           from pathlib import Path
 
+          # ---------------------------------------------------
+          # Root build.gradle.kts
+          # ---------------------------------------------------
           root = Path("build.gradle.kts")
+
+          root.write_text("""plugins {
+              id("com.android.application") version "8.13.2" apply false
+              id("org.jetbrains.kotlin.android") version "2.3.20" apply false
+              id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
+          }
+          """, encoding="utf-8")
+
+          # ---------------------------------------------------
+          # app/build.gradle.kts
+          # ---------------------------------------------------
           app = Path("app/build.gradle.kts")
 
-          # ---------------------------------------------------
-          # ROOT BUILD FILE
-          # ---------------------------------------------------
-          text = root.read_text()
+          text = app.read_text(encoding="utf-8")
 
-          text = text.replace(
-              'id("com.android.application") version "8.7.3" apply false',
-              'id("com.android.application") version "8.13.2" apply false'
-          )
+          # Replace the complete android block.
+          start = text.index("android {")
 
-          text = text.replace(
-              'id("org.jetbrains.kotlin.android") version "2.0.21" apply false',
-              'id("org.jetbrains.kotlin.android") version "2.3.20" apply false'
-          )
+          depth = 0
+          end = None
 
-          text = text.replace(
-              'id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false',
-              'id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false'
-          )
+          for i in range(start, len(text)):
+              if text[i] == "{":
+                  depth += 1
+              elif text[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
 
-          root.write_text(text)
+          if end is None:
+              raise RuntimeError("Could not locate android block.")
 
-          # ---------------------------------------------------
-          # APP BUILD FILE
-          # ---------------------------------------------------
-          text = app.read_text()
+          android_block = """android {
+              namespace = "com.jeecoach.app"
+              compileSdk = 35
 
-          # Make Java and Kotlin use the same JVM target.
-          if "compileOptions {" not in text:
-              text = text.replace(
-                  '    targetSdk = 35\n',
-                  '''    targetSdk = 35
+              defaultConfig {
+                  applicationId = "com.jeecoach.app"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
 
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
-          '''
-              )
-          else:
-              text = text.replace(
-                  'sourceCompatibility = JavaVersion.VERSION_1_8',
-                  'sourceCompatibility = JavaVersion.VERSION_17'
-              )
-              text = text.replace(
-                  'targetCompatibility = JavaVersion.VERSION_1_8',
-                  'targetCompatibility = JavaVersion.VERSION_17'
-              )
-
-          # Explicit Kotlin JVM toolchain.
-          if "jvmToolchain(17)" not in text:
-              text += '''
+          }
 
           kotlin {
               jvmToolchain(17)
-          }
-          '''
+          }"""
 
-          app.write_text(text)
+          text = text[:start] + android_block + text[end:]
 
-          print("Updated Android Gradle Plugin -> 8.13.2")
-          print("Updated Kotlin -> 2.3.20")
-          print("Java compatibility -> 17")
-          print("Kotlin JVM toolchain -> 17")
+          app.write_text(text, encoding="utf-8")
+
+          print("----- build.gradle.kts -----")
+          print(root.read_text(encoding="utf-8"))
+
+          print("----- app/build.gradle.kts -----")
+          print(app.read_text(encoding="utf-8"))
           PY
 
-
       # ---------------------------------------------------------
-      # 10. SHOW FINAL BUILD CONFIG
+      # 4. Download Gradle 8.13 directly
+      #
+      # Do NOT use the runner's preinstalled `gradle` command.
       # ---------------------------------------------------------
-      - name: Show final build configuration
-        working-directory: ${{ steps.project.outputs.project_dir }}
+      - name: Install Gradle 8.13
+        shell: bash
         run: |
-          echo "========== ROOT BUILD =========="
-          cat build.gradle.kts
+          set -e
 
-          echo ""
-          echo "========== APP BUILD =========="
-          cat app/build.gradle.kts
+          GRADLE_VERSION="8.13"
+          GRADLE_DIR="$HOME/gradle-$GRADLE_VERSION"
 
+          if [ ! -d "$GRADLE_DIR" ]; then
+            wget -q \
+              "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+              -O /tmp/gradle.zip
+
+            unzip -q /tmp/gradle.zip -d "$HOME"
+
+            rm -f /tmp/gradle.zip
+          fi
+
+          "$GRADLE_DIR/bin/gradle" --version
 
       # ---------------------------------------------------------
-      # 11. GENERATE GRADLE WRAPPER
+      # 5. Generate wrapper USING Gradle 8.13
       # ---------------------------------------------------------
       - name: Generate Gradle wrapper
-        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
         run: |
-          gradle wrapper --gradle-version 8.13
+          set -e
+
+          cd extracted
+
+          "$HOME/gradle-8.13/bin/gradle" wrapper --gradle-version 8.13
 
           chmod +x gradlew
 
           ./gradlew --version
 
-
       # ---------------------------------------------------------
-      # 12. CLEAN BUILD
+      # 6. Build debug APK
       # ---------------------------------------------------------
-      - name: Clean project
-        working-directory: ${{ steps.project.outputs.project_dir }}
-        run: |
-          ./gradlew clean
-
-
-      # ---------------------------------------------------------
-      # 13. BUILD DEBUG APK
-      # ---------------------------------------------------------
-      - name: Build Debug APK
-        working-directory: ${{ steps.project.outputs.project_dir }}
-        run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon
-
-
-      # ---------------------------------------------------------
-      # 14. VERIFY APK
-      # ---------------------------------------------------------
-      - name: Verify APK
-        working-directory: ${{ steps.project.outputs.project_dir }}
+      - name: Build debug APK
         shell: bash
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          set -e
+
+          cd extracted
+
+          ./gradlew clean assembleDebug --stacktrace
+
+      # ---------------------------------------------------------
+      # 7. Verify APK exists
+      # ---------------------------------------------------------
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="extracted/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not generated."
+            find extracted/app/build -type f | sort || true
             exit 1
           fi
 
-          echo ""
-          echo "=========================================="
-          echo "       JEE COACH APK BUILD SUCCESS"
-          echo "=========================================="
-          echo ""
-
+          echo "APK successfully generated:"
           ls -lh "$APK"
 
-
       # ---------------------------------------------------------
-      # 15. UPLOAD APK
+      # 8. Upload APK
       # ---------------------------------------------------------
-      - name: Upload Debug APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: JEE-Coach-debug
-          path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          path: extracted/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
