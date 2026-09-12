@@ -38,6 +38,11 @@ jobs:
             exit 1
           fi
           echo "Using: $ZIP"
+          echo "--- app/build.gradle.kts inside ZIP ---"
+          unzip -p "$ZIP" app/build.gradle.kts
+          echo "--- checking for MainActivity class ---"
+          unzip -p "$ZIP" app/src/main/java/com/jeecoach/app/MainActivity.kt | grep "class Main" || echo "WARNING: class MainActivity not found"
+          echo "--- extracting ---"
           rm -rf extracted
           mkdir -p extracted
           unzip -q "$ZIP" -d extracted
@@ -58,7 +63,7 @@ jobs:
             --stacktrace \
             --no-daemon \
             --info \
-            --build-cache
+            --build-cache 2>&1 | tail -100
 
       - name: Verify APK exists and print size
         shell: bash
