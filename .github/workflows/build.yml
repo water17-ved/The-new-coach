@@ -38,12 +38,10 @@ jobs:
           mkdir -p extracted
           unzip -q "$ZIP" -d extracted
 
-          # Locate the actual Gradle project even if the ZIP contains a wrapper folder.
           PROJECT_DIR="$(find extracted -type f -name 'settings.gradle.kts' -print -quit | xargs -r dirname)"
 
           if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
             echo "::error::The ZIP does not contain a valid Android Gradle project."
-            echo "Extracted files:"
             find extracted -maxdepth 4 -type f | sort | head -200
             exit 1
           fi
