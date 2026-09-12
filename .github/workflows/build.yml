@@ -1,0 +1,108 @@
+name: Build JEE Coach APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find project ZIP
+        id: find_zip
+        run: |
+          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: No ZIP file found."
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Verify ZIP
+        run: |
+          ZIP="${{ steps.find_zip.outputs.zip }}"
+
+          echo "Testing ZIP integrity..."
+          unzip -t "$ZIP"
+
+      - name: Extract project
+        run: |
+          rm -rf extracted
+          mkdir extracted
+
+          unzip -q "${{ steps.find_zip.outputs.zip }}" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | head -100
+
+      - name: Locate Android project
+        id: locate
+        run: |
+          PROJECT=$(find extracted -type f -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: No Gradle Android project found."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT")
+
+          echo "Android project found at: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Android project
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        run: |
+          test -f app/build.gradle.kts -o -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+
+          echo "Android project validation passed."
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate Gradle wrapper
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        run: |
+          gradle wrapper --gradle-version 8.9
+
+      - name: Build Debug APK
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        run: |
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Verify APK
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: Debug APK was not generated."
+            exit 1
+          fi
+
+          echo "APK successfully generated:"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JEE-Coach-debug
+          path: ${{ steps.locate.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
