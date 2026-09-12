@@ -57,7 +57,7 @@ jobs:
           gradle assembleDebug \
             --stacktrace \
             --no-daemon \
-            --warning-mode all \
+            --info \
             --build-cache
 
       - name: Verify APK exists and print size
